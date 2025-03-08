@@ -17,6 +17,7 @@ exclude = ["examples/target"]
 resolver = "2"
 
 [profile.release]
+debug = true
 opt-level = 3
 
 [profile.bench]

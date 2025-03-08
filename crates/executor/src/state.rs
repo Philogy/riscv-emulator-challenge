@@ -3,10 +3,67 @@ use std::{
     io::{Seek, Write},
 };
 
-use hashbrown::HashMap;
+use hashbrown::{hash_map::DefaultHashBuilder, hash_map::Entry, HashMap};
+use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 
 use crate::{events::MemoryRecord, syscalls::SyscallCode, ExecutorMode};
+
+type MemoryHasher = DefaultHashBuilder;
+
+/// Is memory
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Memory(HashMap<u32, MemoryRecord, MemoryHasher>);
+
+impl Memory {
+    fn new() -> Self {
+        Self(HashMap::with_capacity_and_hasher(
+            200_000,
+            MemoryHasher::new(),
+        ))
+    }
+
+    #[inline(always)]
+    fn translate_addr(addr: u32) -> u32 {
+        if addr < 0x10000 {
+            addr
+        } else {
+            assert!(addr % 4 == 0);
+            0x10000 + ((addr - 0x10000) >> 2)
+        }
+    }
+
+    /// inner
+    pub fn into_inner(self) -> HashMap<u32, MemoryRecord, MemoryHasher> {
+        self.0
+    }
+
+    /// Gets
+    pub fn get(&self, addr: &u32) -> Option<&MemoryRecord> {
+        self.0.get(&Self::translate_addr(*addr))
+    }
+
+    /// entry
+    pub fn entry(&mut self, addr: u32) -> Entry<'_, u32, MemoryRecord, MemoryHasher> {
+        self.0.entry(Self::translate_addr(addr))
+    }
+
+    /// insert
+    pub fn insert(&mut self, addr: u32, record: MemoryRecord) -> Option<MemoryRecord> {
+        self.0.insert(Self::translate_addr(addr), record)
+    }
+
+    /// remove
+    pub fn remove(&mut self, addr: &u32) -> Option<MemoryRecord> {
+        self.0.remove(&Self::translate_addr(*addr))
+    }
+}
+
+impl FromIterator<(u32, MemoryRecord)> for Memory {
+    fn from_iter<T: IntoIterator<Item = (u32, MemoryRecord)>>(iter: T) -> Self {
+        Self(HashMap::from_iter(iter))
+    }
+}
 
 /// Holds data describing the current state of a program's execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20,7 +77,7 @@ pub struct ExecutionState {
 
     /// The memory which instructions operate over. Values contain the memory value and last shard
     /// + timestamp that each memory address was accessed.
-    pub memory: HashMap<u32, MemoryRecord>,
+    pub memory: Memory,
 
     /// The global clock keeps track of how many instructions have been executed through all shards.
     pub global_clk: u64,
@@ -63,7 +120,7 @@ impl ExecutionState {
             current_shard: 1,
             clk: 0,
             pc: pc_start,
-            memory: HashMap::new(),
+            memory: Memory::new(),
             uninitialized_memory: HashMap::new(),
             input_stream: Vec::new(),
             input_stream_ptr: 0,

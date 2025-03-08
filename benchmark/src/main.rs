@@ -18,9 +18,11 @@ fn main() {
     // Run the benchmark multiple times.
     for i in 0..NUM_RUNS {
         println!("Run {}/{}", i + 1, NUM_RUNS);
-        
+
         // Setup the executor.
         let mut executor = Executor::new(Program::from(program).unwrap());
+        println!("executor.unconstrained: {:?}", executor.unconstrained);
+        println!("executor.executor_mode: {:?}", executor.executor_mode);
         executor.write_stdin_slice(buffer);
 
         // Run the executor.
@@ -38,19 +40,31 @@ fn main() {
         let block_hash = B256::from_slice(&bytes);
         assert_eq!(
             block_hash,
-            B256::from_hex("dab3111c08b6a9330098afd5bb0f690b20871522a1f21c924a2aabc6dbd6a5b9").unwrap()
+            B256::from_hex("dab3111c08b6a9330098afd5bb0f690b20871522a1f21c924a2aabc6dbd6a5b9")
+                .unwrap()
         );
-        
+
         let mhz = (executor.state.global_clk as f64 / elapsed) / 1_000_000.0;
-        
+
         println!("  block_hash={block_hash}");
         println!("  cycles: {}", executor.state.global_clk);
         println!("  elapsed: {:.4} seconds", elapsed);
         println!("  mhz: {:.2}", mhz);
-        
+
         // Accumulate totals.
         total_elapsed += elapsed;
         total_mhz += mhz;
+
+        if i == 0 {
+            let map = executor.state.memory.into_inner();
+            println!("map.len(): {:?}", map.len());
+            println!("map.capacity(): {:?}", map.capacity());
+            // let mut keys: Vec<_> = executor.state.memory.into_inner().into_keys().collect();
+            // keys.sort();
+            // let mut f = std::fs::File::create("keys.txt").unwrap();
+            // use std::io::prelude::*;
+            // f.write_all(format!("{:?}", keys).as_bytes()).unwrap();
+        }
     }
 
     // Calculate and print averages
@@ -62,3 +76,10 @@ fn main() {
     println!("Average elapsed: {:.4} seconds", avg_elapsed);
     println!("Average MHz: {:.2}", avg_mhz);
 }
+
+/*
+1100000000000000000000000000000111111111111111111111111111111111
+1111111111111111111111111111111111111111111111111111111111111111
+1111111111111111111111111111111111111111111111111111111111111111
+1111111111111111111111111111111111111111111111111000000000000000
+*/

@@ -11,8 +11,8 @@ use thiserror::Error;
 use crate::{
     context::SP1Context,
     events::{
-        create_alu_lookup_id, LookupId, MemoryAccessPosition, MemoryLocalEvent, MemoryReadRecord,
-        MemoryRecord, MemoryWriteRecord,
+        LookupId, MemoryAccessPosition, MemoryLocalEvent, MemoryReadRecord, MemoryRecord,
+        MemoryWriteRecord,
     },
     hook::{HookEnv, HookRegistry},
     state::{ExecutionState, ForkState},
@@ -20,12 +20,17 @@ use crate::{
     Instruction, Opcode, Program, Register,
 };
 
+use rand::rngs::ThreadRng;
+
 /// An executor for the SP1 RISC-V zkVM.
 ///
 /// The exeuctor is responsible for executing a user program and tracing important events which
 /// occur during execution (i.e., memory reads, alu operations, etc).
 #[repr(C)]
 pub struct Executor<'a> {
+    /// The rng
+    pub rng: ThreadRng,
+
     /// The program.
     pub program: Arc<Program>,
 
@@ -174,6 +179,7 @@ impl<'a> Executor<'a> {
         let hook_registry = context.hook_registry.unwrap_or_default();
 
         Self {
+            rng: rand::thread_rng(),
             state: ExecutionState::new(program.pc_start),
             program,
             cycle_tracker: HashMap::new(),
@@ -621,12 +627,15 @@ impl<'a> Executor<'a> {
             // self.memory_accesses = MemoryAccessRecord::default();
         }
         let lookup_id = if self.executor_mode == ExecutorMode::Trace {
-            create_alu_lookup_id()
+            // create_alu_lookup_id(&mut self.rng)
+
+            LookupId::default()
         } else {
             LookupId::default()
         };
         let syscall_lookup_id = if self.executor_mode == ExecutorMode::Trace {
-            create_alu_lookup_id()
+            // create_alu_lookup_id(&mut self.rng)
+            LookupId::default()
         } else {
             LookupId::default()
         };

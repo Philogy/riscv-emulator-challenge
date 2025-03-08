@@ -146,6 +146,8 @@ pub fn dashu_to_biguint(integer: &dashu::integer::UBig) -> BigUint {
     BigUint::from_bytes_le(&integer.to_le_bytes())
 }
 
+use alloy_primitives::U256;
+
 pub fn dashu_modpow(
     base: &dashu::integer::UBig,
     exponent: &dashu::integer::UBig,
@@ -155,17 +157,59 @@ pub fn dashu_modpow(
         return dashu::integer::UBig::from(0u32);
     }
 
+    assert!(base.to_le_bytes().len() <= 32, "{:x?}", base.to_le_bytes());
+    assert!(exponent.to_le_bytes().len() <= 32);
+    assert!(modulus.to_le_bytes().len() <= 32);
+
+    let u256_res = {
+        let modulus = U256::from_le_slice(&modulus.to_le_bytes());
+
+        let base = U256::from_le_slice(&base.to_le_bytes());
+        let exp = U256::from_le_slice(&exponent.to_le_bytes()) % modulus;
+
+        // let mut i = 0;
+
+        // while !exp.is_zero() {
+        //     println!("{i}: {result}");
+
+        //     if !(exp % U256::from(2)).is_zero() {
+        //         // result = result.mul_redc(base, modulus, inv);
+        //         result = result.mul_mod(base, modulus);
+        //     }
+        //     exp >>= 1;
+        //     // base = base.mul_mod(base, modulus);
+        //     base = base.square_redc(modulus, inv);
+        //     i += 1;
+        // }
+
+        // println!("result: {result}");
+
+        let result = base.pow_mod(exp, modulus);
+
+        dashu::integer::UBig::from_le_bytes(result.as_le_slice())
+    };
+
+    return u256_res;
+
     let mut result = dashu::integer::UBig::from(1u32);
     let mut base = base.clone() % modulus;
     let mut exp = exponent.clone();
 
+    let mut i = 0;
+
     while exp > dashu::integer::UBig::from(0u32) {
+        println!("{i}: {result}");
+
         if &exp % dashu::integer::UBig::from(2u32) == dashu::integer::UBig::from(1u32) {
             result = (result * &base) % modulus;
         }
         exp >>= 1;
         base = (&base * &base) % modulus;
+
+        i += 1;
     }
+
+    assert_eq!(result, u256_res, "{result} != {u256_res}");
 
     result
 }
@@ -180,9 +224,33 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
             if #[cfg(feature = "bigint-rug")] {
                 self.sw_add_rug(other)
             } else {
+
+                let p = U256::from_le_slice(E::BaseField::MODULUS);
+                let self_x = U256::from_le_slice(self.x.to_bytes_le().as_slice());
+                let self_y = U256::from_le_slice(self.y.to_bytes_le().as_slice());
+                let other_x = U256::from_le_slice(other.x.to_bytes_le().as_slice());
+                let other_y = U256::from_le_slice(other.y.to_bytes_le().as_slice());
+
+
+                let slope_num = other_y.add_mod(p - self_y, p);
+                let slope_denom = other_x.add_mod(p - self_x, p);
+                let slope = slope_num.mul_mod(slope_denom.inv_mod(p).unwrap(), p);
+
+                let x_3n = slope.mul_mod(slope, p).add_mod(p - self_x, p).add_mod(p - other_x, p);
+                let y_3n = self_x.add_mod(p - x_3n, p).mul_mod(slope, p).add_mod(p - self_y, p);
+
+                return AffinePoint::new(
+                    BigUint::from_bytes_le(x_3n.as_le_slice()),
+                    BigUint::from_bytes_le(y_3n.as_le_slice())
+                );
+
+
+
+
                 let p = biguint_to_dashu(&E::BaseField::modulus());
                 let self_x = biguint_to_dashu(&self.x);
                 let self_y = biguint_to_dashu(&self.y);
+
                 let other_x = biguint_to_dashu(&other.x);
                 let other_y = biguint_to_dashu(&other.y);
 
@@ -205,25 +273,27 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
             if #[cfg(feature = "bigint-rug")] {
                 self.sw_double_rug()
             } else {
-                let p = biguint_to_dashu(&E::BaseField::modulus());
-                let a = biguint_to_dashu(&E::a_int());
 
-                let self_x = biguint_to_dashu(&self.x);
-                let self_y = biguint_to_dashu(&self.y);
+                // assert!(p.to_le_bytes().len() == 32);
 
-                let slope_numerator = (&a + &(&self_x * &self_x) * 3u32) % &p;
+                let p = U256::from_le_slice(E::BaseField::MODULUS);
+                let a = U256::from_le_slice(E::a_int().to_bytes_le().as_slice());
+                let x = U256::from_le_slice(self.x.to_bytes_le().as_slice());
+                let y = U256::from_le_slice(self.y.to_bytes_le().as_slice());
 
-                let slope_denominator = (&self_y * 2u32) % &p;
-                let slope_denom_inverse =
-                    dashu_modpow(&slope_denominator, &(&p - &dashu::integer::UBig::from(2u32)), &p);
-                // let slope_denom_inverse = slope_denominator.modpow(&(&p - 2u32), &p);
-                let slope = (slope_numerator * &slope_denom_inverse) % &p;
+                let slope_num = x.mul_mod(x, p).mul_mod(U256::from(3), p).add_mod(a, p);
+                let slope_denom = y.mul_mod(U256::from(2), p);
+                let slop_denom_inv = U256::inv_mod(slope_denom, p).unwrap();
+                let slope = U256::mul_mod(slope_num, slop_denom_inv, p);
 
-                let x_3n = (&slope * &slope + &p + &p - &self_x - &self_x) % &p;
 
-                let y_3n = (&slope * &(&p + &self_x - &x_3n) + &p - &self_y) % &p;
+                let x_3n = U256::mul_mod(slope, slope, p).add_mod(p - x, p).add_mod(p - x, p);
+                let y_3n = x.add_mod(p - x_3n, p).mul_mod(slope, p).add_mod(p - y, p);
 
-                AffinePoint::new(dashu_to_biguint(&x_3n), dashu_to_biguint(&y_3n))
+                return AffinePoint::new(
+                    BigUint::from_bytes_le(x_3n.as_le_slice()),
+                    BigUint::from_bytes_le(y_3n.as_le_slice()),
+                );
             }
         }
     }
