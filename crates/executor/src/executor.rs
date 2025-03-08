@@ -15,8 +15,9 @@ use crate::{
         MemoryWriteRecord,
     },
     hook::{HookEnv, HookRegistry},
-    state::{ExecutionState, ForkState, MemEntry as Entry},
-    syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
+    memory_map::{MemEntry as Entry, MemoryMap},
+    state::{ExecutionState, ForkState},
+    syscalls::{default_syscall_map, LocalMemAccessMap, Syscall, SyscallCode, SyscallContext},
     Instruction, Opcode, Program, Register,
 };
 
@@ -63,7 +64,7 @@ pub struct Executor<'a> {
     pub state: ExecutionState,
 
     /// Local memory access events.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
+    pub local_memory_access: LocalMemAccessMap,
 
     /// A counter for the number of cycles that have been executed in certain functions.
     pub cycle_tracker: HashMap<String, (u64, u32)>,
@@ -189,7 +190,7 @@ impl<'a> Executor<'a> {
             max_cycles: context.max_cycles,
             memory_checkpoint: HashMap::new(),
             uninitialized_memory_checkpoint: HashMap::new(),
-            local_memory_access: HashMap::new(),
+            local_memory_access: LocalMemAccessMap::new(),
             maximal_shapes: None,
         }
     }
@@ -331,7 +332,7 @@ impl<'a> Executor<'a> {
         addr: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut LocalMemAccessMap>,
     ) -> MemoryReadRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
@@ -371,16 +372,12 @@ impl<'a> Executor<'a> {
                 self.uninitialized_memory_checkpoint
                     .entry(addr)
                     .or_insert_with(|| *value != 0);
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    shard: 0,
-                    timestamp: 0,
-                })
+                entry.insert(MemoryRecord::new(shard, timestamp, *value))
             }
         };
 
         let prev_record = *record;
-        record.shard = shard;
+        record.set_shard(shard);
         record.timestamp = timestamp;
 
         if !self.unconstrained {
@@ -405,9 +402,9 @@ impl<'a> Executor<'a> {
         // Construct the memory read record.
         MemoryReadRecord::new(
             record.value,
-            record.shard,
+            record.shard(),
             record.timestamp,
-            prev_record.shard,
+            prev_record.shard(),
             prev_record.timestamp,
         )
     }
@@ -460,45 +457,41 @@ impl<'a> Executor<'a> {
                     .entry(addr)
                     .or_insert_with(|| *value != 0);
 
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    shard: 0,
-                    timestamp: 0,
-                })
+                entry.insert(MemoryRecord::new(shard, 0, *value))
             }
         };
 
         let prev_record = *record;
         record.value = value;
-        record.shard = shard;
+        record.set_shard(shard);
         record.timestamp = timestamp;
 
-        // if !self.unconstrained {
-        //     let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-        //         local_memory_access
-        //     } else {
-        //         &mut self.local_memory_access
-        //     };
+        if !self.unconstrained {
+            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
+                local_memory_access
+            } else {
+                &mut self.local_memory_access
+            };
 
-        //     local_memory_access
-        //         .entry(addr)
-        //         .and_modify(|e| {
-        //             e.final_mem_access = *record;
-        //         })
-        //         .or_insert(MemoryLocalEvent {
-        //             addr,
-        //             initial_mem_access: prev_record,
-        //             final_mem_access: *record,
-        //         });
-        // }
+            local_memory_access
+                .entry(addr)
+                .and_modify(|e| {
+                    e.final_mem_access = *record;
+                })
+                .or_insert(MemoryLocalEvent {
+                    addr,
+                    initial_mem_access: prev_record,
+                    final_mem_access: *record,
+                });
+        }
 
         // Construct the memory write record.
         MemoryWriteRecord::new(
             record.value,
-            record.shard,
+            record.shard(),
             record.timestamp,
             prev_record.value,
-            prev_record.shard,
+            prev_record.shard(),
             prev_record.timestamp,
         )
     }
@@ -568,16 +561,13 @@ impl<'a> Executor<'a> {
                     self.uninitialized_memory_checkpoint
                         .entry(addr)
                         .or_insert_with(|| *value != 0);
-                    (&mut self.state.memory.registers[register as usize]).insert(MemoryRecord {
-                        value: *value,
-                        shard: 0,
-                        timestamp: 0,
-                    })
+                    (&mut self.state.memory.registers[register as usize])
+                        .insert(MemoryRecord::new(0, 0, *value))
                 }
             };
 
         let prev_record = *record;
-        record.shard = shard;
+        record.set_shard(shard);
         record.timestamp = timestamp;
 
         if !self.unconstrained {
@@ -1071,14 +1061,9 @@ impl<'a> Executor<'a> {
 
         tracing::debug!("loading memory image");
         for (&addr, value) in &self.program.memory_image {
-            self.state.memory.insert(
-                addr,
-                MemoryRecord {
-                    value: *value,
-                    shard: 0,
-                    timestamp: 0,
-                },
-            );
+            self.state
+                .memory
+                .insert(addr, MemoryRecord::new(0, 0, *value));
         }
     }
 
