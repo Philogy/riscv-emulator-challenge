@@ -8,6 +8,7 @@ use crate::{
     utils::biguint_to_bits_le,
     AffinePoint, EllipticCurve, EllipticCurveParameters,
 };
+use alloy_primitives::{Uint, U256, U512};
 
 #[cfg(feature = "bigint-rug")]
 use crate::utils::{biguint_to_rug, rug_to_biguint};
@@ -146,8 +147,6 @@ pub fn dashu_to_biguint(integer: &dashu::integer::UBig) -> BigUint {
     BigUint::from_bytes_le(&integer.to_le_bytes())
 }
 
-use alloy_primitives::U256;
-
 pub fn dashu_modpow(
     base: &dashu::integer::UBig,
     exponent: &dashu::integer::UBig,
@@ -268,32 +267,40 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
         }
     }
 
+    fn sw_double_generic<const BITS: usize, const LIMBS: usize>(&self) -> AffinePoint<SwCurve<E>> {
+        let p = Uint::<BITS, LIMBS>::from_le_slice(E::BaseField::MODULUS);
+        let a = Uint::<BITS, LIMBS>::from_le_slice(E::a_int().to_bytes_le().as_slice());
+        let x = Uint::<BITS, LIMBS>::from_le_slice(self.x.to_bytes_le().as_slice());
+        let y = Uint::<BITS, LIMBS>::from_le_slice(self.y.to_bytes_le().as_slice());
+
+        let slope_num = x
+            .mul_mod(x, p)
+            .mul_mod(Uint::<BITS, LIMBS>::from(3), p)
+            .add_mod(a, p);
+        let slope_denom = y.mul_mod(Uint::<BITS, LIMBS>::from(2), p);
+        let slop_denom_inv = slope_denom.inv_mod(p).unwrap();
+        let slope = slope_num.mul_mod(slop_denom_inv, p);
+
+        let x_3n = slope.mul_mod(slope, p).add_mod(p - x, p).add_mod(p - x, p);
+        let y_3n = x.add_mod(p - x_3n, p).mul_mod(slope, p).add_mod(p - y, p);
+
+        return AffinePoint::new(
+            BigUint::from_bytes_le(x_3n.as_le_slice()),
+            BigUint::from_bytes_le(y_3n.as_le_slice()),
+        );
+    }
+
     pub fn sw_double(&self) -> AffinePoint<SwCurve<E>> {
         cfg_if::cfg_if! {
             if #[cfg(feature = "bigint-rug")] {
                 self.sw_double_rug()
             } else {
-
-                // assert!(p.to_le_bytes().len() == 32);
-
-                let p = U256::from_le_slice(E::BaseField::MODULUS);
-                let a = U256::from_le_slice(E::a_int().to_bytes_le().as_slice());
-                let x = U256::from_le_slice(self.x.to_bytes_le().as_slice());
-                let y = U256::from_le_slice(self.y.to_bytes_le().as_slice());
-
-                let slope_num = x.mul_mod(x, p).mul_mod(U256::from(3), p).add_mod(a, p);
-                let slope_denom = y.mul_mod(U256::from(2), p);
-                let slop_denom_inv = U256::inv_mod(slope_denom, p).unwrap();
-                let slope = U256::mul_mod(slope_num, slop_denom_inv, p);
-
-
-                let x_3n = U256::mul_mod(slope, slope, p).add_mod(p - x, p).add_mod(p - x, p);
-                let y_3n = x.add_mod(p - x_3n, p).mul_mod(slope, p).add_mod(p - y, p);
-
-                return AffinePoint::new(
-                    BigUint::from_bytes_le(x_3n.as_le_slice()),
-                    BigUint::from_bytes_le(y_3n.as_le_slice()),
-                );
+                if E::BaseField::MODULUS.len() == 32 {
+                    self.sw_double_generic::<256, 4>()
+                } else {
+                    assert!(E::BaseField::MODULUS.len() <= 64);
+                    self.sw_double_generic::<512, 8>()
+                }
             }
         }
     }

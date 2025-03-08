@@ -21,8 +21,10 @@ fn main() {
 
         // Setup the executor.
         let mut executor = Executor::new(Program::from(program).unwrap());
-        println!("executor.unconstrained: {:?}", executor.unconstrained);
-        println!("executor.executor_mode: {:?}", executor.executor_mode);
+        if i == 0 {
+            println!("executor.unconstrained: {:?}", executor.unconstrained);
+            println!("executor.executor_mode: {:?}", executor.executor_mode);
+        }
         executor.write_stdin_slice(buffer);
 
         // Run the executor.
@@ -56,14 +58,17 @@ fn main() {
         total_mhz += mhz;
 
         if i == 0 {
-            let map = executor.state.memory.into_inner();
-            println!("map.len(): {:?}", map.len());
-            println!("map.capacity(): {:?}", map.capacity());
-            // let mut keys: Vec<_> = executor.state.memory.into_inner().into_keys().collect();
-            // keys.sort();
-            // let mut f = std::fs::File::create("keys.txt").unwrap();
-            // use std::io::prelude::*;
-            // f.write_all(format!("{:?}", keys).as_bytes()).unwrap();
+            // let map = executor.state.memory.into_inner();
+            // let mut distro = [0u32; 256];
+
+            // for &key in map.keys() {
+            //     assert!((key >> 24) == 0);
+            //     distro[(key >> 16) as usize & 0xff] += 1;
+            // }
+
+            // for i in 0..256 {
+            //     println!("0x{i:02x}: {}", distro[i])
+            // }
         }
     }
 

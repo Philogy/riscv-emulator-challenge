@@ -1,1 +1,7 @@
 target/
+*flamegraph.svg
+opti-graph.svg
+profile.json
+keys.hex
+keys.txt
+

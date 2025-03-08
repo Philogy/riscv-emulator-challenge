@@ -428,7 +428,7 @@ impl InstructionProcessor for InstructionTranspiler {
 /// This function will return an error if the [`Instruction`] cannot be processed.
 #[must_use]
 pub(crate) fn transpile(instructions_u32: &[u32]) -> Vec<Instruction> {
-    let mut instructions = Vec::new();
+    let mut instructions = Vec::with_capacity(instructions_u32.len());
     let mut transpiler = InstructionTranspiler;
     for instruction_u32 in instructions_u32 {
         let instruction = process_instruction(&mut transpiler, *instruction_u32).unwrap();
